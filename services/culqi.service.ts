@@ -3,12 +3,15 @@ import { CulqiToken } from '@/types';
 declare global {
   interface Window {
     Culqi: any;
+    culqiSuccessHandler: () => void;
+    culqiErrorHandler: () => void;
   }
 }
 
 class CulqiService {
   private static instance: CulqiService;
   private culqiLoaded = false;
+  private culqiPublicKey = process.env.NEXT_PUBLIC_CULQI_PUBLIC_KEY;
 
   private constructor() {}
 
@@ -38,88 +41,79 @@ class CulqiService {
     });
   }
 
-  // Abrir Checkout de Culqi (MOCK para desarrollo)
+  // Configurar y abrir Culqi Checkout REAL
   async openCheckout(
     amount: number,
     description: string,
     email: string
   ): Promise<CulqiToken> {
-    // MOCK: Simular el flujo de Culqi sin script real
-    return new Promise((resolve, reject) => {
-      // Simular ventana modal
-      const shouldSucceed = window.confirm(
-        `🔒 MOCK: Culqi Checkout\n\n` +
-        `Producto: ${description}\n` +
-        `Monto: S/ ${amount.toFixed(2)}\n` +
-        `Email: ${email}\n\n` +
-        `Haz clic en OK para simular pago exitoso`
-      );
-    
-
-      if (shouldSucceed) {
-        // Simular token de Culqi
-        setTimeout(() => {
-          resolve({
-            id: `tkn_mock_${Date.now()}`,
-            object: 'token',
-            email: email,
-            card_number: '411111******1111',
-            creation_date: Date.now()
-          });
-        }, 1000);
-      } else {
-        reject(new Error('Pago cancelado por el usuario'));
-      }
-    });
-  }
-
-  // Configurar Culqi real (cuando tengas las credenciales)
-  configureRealCulqi(publicKey: string, amount: number, description: string, email: string) {
-    if (typeof window === 'undefined' || !window.Culqi) {
-      console.warn('Culqi no está cargado');
-      return;
+    if (!this.culqiPublicKey) {
+      throw new Error('Falta la llave pública de Culqi en las variables de entorno');
     }
 
-    window.Culqi.publicKey = publicKey;
-    window.Culqi.settings({
-      title: 'CulqiPay',
-      currency: 'PEN',
-      amount: amount * 100, // Culqi usa centavos
-      order: `order-${Date.now()}`,
-    });
+    // Cargar script de Culqi si no está cargado
+    await this.loadCulqiScript();
 
-    window.Culqi.options({
-      lang: 'es',
-      installments: false,
-      paymentMethods: {
-        tarjeta: true,
-        yape: false,
-      },
-    });
-  }
-
-  // Función que se llamará cuando estés listo para usar Culqi real
-  openRealCheckout(): Promise<CulqiToken> {
     return new Promise((resolve, reject) => {
       if (typeof window === 'undefined' || !window.Culqi) {
-        reject(new Error('Culqi no está configurado'));
+        reject(new Error('Culqi no está disponible'));
         return;
       }
 
-      // Handler de éxito
-      window.culqiSuccessHandler = () => {
+      // Configurar llave pública
+      window.Culqi.publicKey = this.culqiPublicKey;
+      
+      // Configurar settings de Culqi v4
+      window.Culqi.settings({
+        title: 'CulqiPay',
+        currency: 'PEN',
+        amount: Math.round(amount * 100), // Culqi usa centavos
+      });
+
+      // Configurar opciones de Culqi v4
+      window.Culqi.options({
+        lang: 'auto',
+        installments: false,
+        paymentMethods: {
+          tarjeta: true,
+          yape: false,
+          billetera: false,
+          bancaMovil: false,
+          agente: false,
+          cuotealo: false,
+        },
+        style: {
+          logo: '',
+          maincolor: '#eab308',
+          buttontext: '#000000',
+          maintext: '#4a5568',
+          desctext: '#4a5568',
+        },
+      });
+
+      // Configurar handler global para Culqi
+      (window as any).culqi = function() {
         if (window.Culqi.token) {
-          resolve(window.Culqi.token);
+          const token: CulqiToken = {
+            id: window.Culqi.token.id,
+            object: window.Culqi.token.object,
+            email: window.Culqi.token.email,
+            card_number: window.Culqi.token.card_number,
+            creation_date: window.Culqi.token.creation_date,
+          };
+          resolve(token);
+        } else if (window.Culqi.error) {
+          const errorMessage = window.Culqi.error.user_message || 'Error en el proceso de pago';
+          reject(new Error(errorMessage));
         }
       };
 
-      // Handler de error
-      window.culqiErrorHandler = () => {
-        reject(new Error(window.Culqi.error.user_message));
-      };
-
       // Abrir checkout
-      window.Culqi.open();
+      try {
+        window.Culqi.open();
+      } catch (error) {
+        reject(new Error('Error al abrir Culqi Checkout'));
+      }
     });
   }
 }

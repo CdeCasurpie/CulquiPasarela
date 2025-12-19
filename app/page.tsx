@@ -11,49 +11,73 @@ import ProductCarousel from '@/components/products/ProductCarousel';
 import ProductDetails from '@/components/products/ProductDetails';
 import culqiService from '@/services/culqi.service';
 import productsService from '@/services/products.service';
-import { ShoppingBag, CheckCircle } from 'lucide-react';
+import { ShoppingBag, CheckCircle, AlertCircle } from 'lucide-react';
 
 export default function Home() {
   const { user, loading: authLoading, isAuthenticated } = useAuth();
-  const { products, purchasedProducts, loading: productsLoading, isPurchased, refreshProducts } = useProducts(user?.id);
+  const { products, purchasedProducts, loading: productsLoading, isPurchased, refreshProducts, error: productsError } = useProducts(user?.id);
   const [showRegister, setShowRegister] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [paymentCancelled, setPaymentCancelled] = useState(false);
 
   // Manejar selección de producto
   const handleSelectProduct = (product: Product) => {
     if (!isPurchased(product.id)) {
       setSelectedProduct(product);
+      setPaymentError(null);
+      setPaymentSuccess(false);
     }
   };
 
-  // Manejar proceso de pago
+  // Manejar proceso de pago REAL
   const handlePurchase = async (product: Product) => {
     if (!user) return;
 
     try {
       setPaymentLoading(true);
+      setPaymentError(null);
+      setPaymentSuccess(false);
+      setPaymentCancelled(false);
 
-      // Abrir Culqi Checkout (MOCK)
+      // 1. Abrir Culqi Checkout REAL y obtener token
       const token = await culqiService.openCheckout(
         product.precio,
         product.nombre,
         user.email
       );
 
-      // Simular llamada a Edge Function
-      // En producción: await supabase.functions.invoke('create_payment', { ... })
-      await productsService.createPayment(user.id, product.id, token.id);
+      // 2. Enviar token a Edge Function para procesar el pago
+      await productsService.createPayment(product.id, token.id);
 
-      // Éxito
-      alert('Pago exitoso! El producto ha sido agregado a tu biblioteca.');
+      // 3. Éxito - Actualizar INMEDIATAMENTE
+      setPaymentSuccess(true);
       
-      // Refrescar productos
-      refreshProducts();
-      setSelectedProduct(null);
+      // 4. Refrescar productos INMEDIATAMENTE para mostrar el nuevo estado
+      await refreshProducts();
+      
+      // 5. Limpiar estados después de 2 segundos
+      setTimeout(() => {
+        setSelectedProduct(null);
+        setPaymentSuccess(false);
+      }, 2000);
+
     } catch (error) {
       console.error('Error en el pago:', error);
-      alert('Error: ' + (error instanceof Error ? error.message : 'Error desconocido'));
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido en el pago';
+      
+      // Detectar si fue cancelación
+      if (errorMessage === 'CHECKOUT_CANCELLED') {
+        setPaymentCancelled(true);
+        // Ocultar mensaje después de 2 segundos
+        setTimeout(() => {
+          setPaymentCancelled(false);
+        }, 2000);
+      } else {
+        setPaymentError(errorMessage);
+      }
     } finally {
       setPaymentLoading(false);
     }
@@ -93,6 +117,28 @@ export default function Home() {
       <Header />
 
       <main className="max-w-7xl mx-auto px-6 py-8">
+        {/* Mensaje de éxito */}
+        {paymentSuccess && (
+          <div className="mb-6 bg-green-500/10 border border-green-500 text-green-500 px-6 py-4 rounded-lg flex items-center gap-3">
+            <CheckCircle size={24} />
+            <div>
+              <p className="font-bold">Pago exitoso</p>
+              <p className="text-sm">El producto ha sido agregado a tu biblioteca</p>
+            </div>
+          </div>
+        )}
+
+        {/* Error general de productos */}
+        {productsError && (
+          <div className="mb-6 bg-red-500/10 border border-red-500 text-red-500 px-6 py-4 rounded-lg flex items-center gap-3">
+            <AlertCircle size={24} />
+            <div>
+              <p className="font-bold">Error</p>
+              <p className="text-sm">{productsError}</p>
+            </div>
+          </div>
+        )}
+
         {/* Sección de productos */}
         <section className="mb-8">
           <div className="flex items-center gap-3 mb-6">
@@ -125,6 +171,18 @@ export default function Home() {
                 Detalle del Producto
               </h2>
             </div>
+
+            {/* Error de pago */}
+            {paymentError && (
+              <div className="mb-4 bg-red-500/10 border border-red-500 text-red-500 px-6 py-4 rounded-lg flex items-center gap-3">
+                <AlertCircle size={24} />
+                <div>
+                  <p className="font-bold">Error en el pago</p>
+                  <p className="text-sm">{paymentError}</p>
+                </div>
+              </div>
+            )}
+
             <ProductDetails
               product={selectedProduct}
               isPurchased={isPurchased(selectedProduct.id)}

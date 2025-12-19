@@ -19,6 +19,7 @@ export interface Product {
   descripcion: string;
   activo: boolean;
   imagen_url?: string;
+  purchased?: boolean; // Indica si el usuario ya compró este producto
 }
 
 // Pago realizado

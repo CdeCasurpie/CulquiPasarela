@@ -4,11 +4,12 @@ Aplicación web completa de pagos construida con **Next.js**, **Supabase** y **C
 
 ## Características
 
-- Autenticación completa (Login/Register)
+- Autenticación completa con Supabase Auth
 - Carrusel de productos horizontal
-- Sistema de pagos con Culqi
+- Sistema de pagos real con Culqi
 - Gestión de productos comprados
 - Arquitectura de seguridad profesional
+- Edge Functions para toda la lógica de negocio
 - 100% TypeScript
 - Diseño moderno (Plomo azulado + Amarillo)
 
@@ -20,27 +21,32 @@ Aplicación web completa de pagos construida con **Next.js**, **Supabase** y **C
 - **Lucide React** para iconos
 - **Hooks personalizados** para lógica de negocio
 - **Componentes reutilizables**
+- **Supabase Client** para autenticación y llamadas a Edge Functions
 
-### Backend (Supabase - Por configurar)
-- **Supabase Auth**: Autenticación de usuarios
-- **PostgreSQL**: Base de datos
-- **Edge Functions**: Lógica de negocio segura
+### Backend (Supabase - CONECTADO)
+- **Supabase Auth**: Autenticación de usuarios real
+- **PostgreSQL**: Base de datos con tablas `demo_pay_products` y `demo_pay_purchases`
+- **Edge Functions**: 
+  - `get-products`: Obtiene productos y verifica compras del usuario
+  - `get-purchased-products`: Lista de productos comprados
+  - `create-payment`: Procesa pagos con Culqi (usa SECRET_KEY segura)
 
-### Pasarela (Culqi - Por configurar)
-- **Culqi Checkout**: Modal de pago seguro
-- **Tokenización**: Sin guardar datos de tarjetas
+### Pasarela (Culqi - CONECTADA)
+- **Culqi Checkout v4**: Modal de pago oficial
+- **Tokenización**: Segura, sin guardar datos de tarjetas
+- **Integración sandbox**: Lista para pruebas
 
 ## Estructura del Proyecto
 
 ```
 ├── app/
 │   ├── layout.tsx          # Layout principal
-│   ├── page.tsx            # Página principal
+│   ├── page.tsx            # Página principal (REAL)
 │   └── globals.css         # Estilos globales
 ├── components/
 │   ├── auth/
-│   │   ├── LoginForm.tsx
-│   │   └── RegisterForm.tsx
+│   │   ├── LoginForm.tsx   # Login con Supabase Auth
+│   │   └── RegisterForm.tsx # Registro con Supabase Auth
 │   ├── layout/
 │   │   └── Header.tsx
 │   └── products/
@@ -48,17 +54,17 @@ Aplicación web completa de pagos construida con **Next.js**, **Supabase** y **C
 │       ├── ProductCarousel.tsx
 │       └── ProductDetails.tsx
 ├── hooks/
-│   ├── useAuth.ts          # Hook de autenticación
-│   └── useProducts.ts      # Hook de productos
+│   ├── useAuth.ts          # Hook de autenticación REAL
+│   └── useProducts.ts      # Hook de productos REAL
 ├── services/
-│   ├── auth.service.ts     # Servicio de autenticación (MOCK)
-│   ├── culqi.service.ts    # Servicio de Culqi (MOCK)
-│   └── products.service.ts # Servicio de productos (MOCK)
+│   ├── auth.service.ts     # Servicio de autenticación (Supabase)
+│   ├── culqi.service.ts    # Servicio de Culqi (REAL)
+│   └── products.service.ts # Servicio de productos (Edge Functions)
 ├── types/
 │   └── index.ts            # Tipos TypeScript
 ├── lib/
-│   ├── supabase/           # Configuración Supabase (próximamente)
-│   └── culqi/              # Configuración Culqi (próximamente)
+│   └── supabase/
+│       └── client.ts       # Cliente de Supabase configurado
 └── .env.local              # Variables de entorno
 ```
 
@@ -67,6 +73,8 @@ Aplicación web completa de pagos construida con **Next.js**, **Supabase** y **C
 ```bash
 # Instalar dependencias
 npm install
+
+# Configurar variables de entorno (ver sección siguiente)
 
 # Ejecutar en desarrollo
 npm run dev
@@ -82,15 +90,15 @@ npm start
 
 ### 1. Variables de Entorno
 
-Copia `.env.example` a `.env.local` y configura:
+Crea `.env.local` con tus credenciales REALES:
 
 ```env
-# Supabase
-NEXT_PUBLIC_SUPABASE_URL=tu-url-de-supabase
-NEXT_PUBLIC_SUPABASE_ANON_KEY=tu-anon-key
+# Supabase (OBLIGATORIO)
+NEXT_PUBLIC_SUPABASE_URL=https://tu-proyecto.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=tu-anon-key-real
 
-# Culqi (SOLO llave pública)
-NEXT_PUBLIC_CULQI_PUBLIC_KEY=pk_test_tu_llave_publica
+# Culqi (OBLIGATORIO - solo llave pública)
+NEXT_PUBLIC_CULQI_PUBLIC_KEY=pk_test_tu_llave_publica_real
 
 # App
 NEXT_PUBLIC_APP_URL=http://localhost:3000
@@ -98,47 +106,53 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 
 ### 2. Base de Datos Supabase
 
-Crea estas tablas en Supabase:
+Las tablas ya deben estar creadas:
 
-**Tabla: productos**
+**Tabla: demo_pay_products**
 ```sql
-create table productos (
+create table demo_pay_products (
   id uuid primary key default uuid_generate_v4(),
-  nombre text not null,
-  precio decimal(10,2) not null,
-  descripcion text,
-  activo boolean default true,
-  imagen_url text,
+  name text not null,
+  description text,
+  price_cents integer not null,
+  currency text default 'PEN',
+  active boolean default true,
+  image_url text,
   created_at timestamp with time zone default now()
 );
 ```
 
-**Tabla: pagos**
+**Tabla: demo_pay_purchases**
 ```sql
-create table pagos (
+create table demo_pay_purchases (
   id uuid primary key default uuid_generate_v4(),
   user_id uuid references auth.users(id) not null,
-  product_id uuid references productos(id) not null,
-  monto decimal(10,2) not null,
-  estado text not null check (estado in ('pending', 'success', 'failed')),
+  product_id uuid references demo_pay_products(id) not null,
+  amount_cents integer not null,
+  currency text default 'PEN',
+  status text not null,
   culqi_charge_id text,
+  culqi_status text,
   created_at timestamp with time zone default now()
 );
 ```
 
 ### 3. Edge Functions Supabase
 
-Crear las siguientes Edge Functions:
+Debes tener desplegadas estas funciones:
 
-- `get_products`: Obtener lista de productos
-- `get_purchased_products`: Obtener productos comprados del usuario
-- `create_payment`: Procesar pago con Culqi
+- `get-products`: Lista productos activos y marca cuáles ya compró el usuario
+- `get-purchased-products`: Lista productos que el usuario compró
+- `create-payment`: Procesa el pago con Culqi usando la SECRET_KEY
 
 ### 4. Culqi
 
-1. Crear cuenta en [Culqi](https://culqi.com/)
-2. Obtener llaves de prueba
-3. Configurar webhook (opcional)
+Configuración en Supabase Edge Functions:
+
+```bash
+# Variables secretas en Supabase
+CULQI_SECRET_KEY=sk_test_tu_secret_key
+```
 
 ## Diseño
 
@@ -149,40 +163,61 @@ Crear las siguientes Edge Functions:
 
 ## Seguridad
 
-### Implementada:
-- Autenticación por sesión
-- Validación de formularios
-- Tipos TypeScript estrictos
-- Separación frontend/backend
-
-### Por implementar (cuando conectes Supabase):
-- Edge Functions para toda lógica de negocio
+### Implementado:
+- Autenticación con Supabase Auth
+- Todas las consultas pasan por Edge Functions
+- Secret keys solo en servidor (Edge Functions)
+- Validación de pagos duplicados
 - Row Level Security (RLS) en tablas
-- Validación de pagos en servidor
-- Secret keys solo en Edge Functions
+- Tokens de Culqi nunca se guardan
+- El frontend NUNCA decide precios ni cobra directamente
 
-## Estado Actual (MOCK)
+## Flujo de Pago
 
-El proyecto está completamente funcional con **datos mock**:
+1. Usuario selecciona producto
+2. Click en "Pagar con Culqi"
+3. Se abre Culqi Checkout v4 (oficial)
+4. Usuario ingresa datos de tarjeta
+5. Culqi devuelve token temporal
+6. Frontend envía token a Edge Function `create-payment`
+7. Edge Function:
+   - Valida sesión
+   - Obtiene precio real del producto
+   - Verifica que no esté comprado
+   - Usa CULQI_SECRET_KEY para crear cargo
+   - Guarda resultado en BD
+8. Frontend recibe confirmación y actualiza UI
 
-- Login/Register funcional
-- Productos mockeados
-- Flujo de pago simulado
-- Gestión de compras en localStorage
+## Estado Actual
 
-**Credenciales de prueba:**
-- Email: `demo@culqi.com`
-- Password: `demo123`
+El proyecto está **100% funcional con datos reales**:
+
+- Supabase Auth funcionando
+- Edge Functions desplegadas y conectadas
+- Culqi Checkout integrado (sandbox)
+- Productos desde base de datos real
+- Pagos procesados por Edge Functions
+
+**Para probar:**
+1. Regístrate o inicia sesión
+2. Selecciona un producto
+3. Haz clic en "Pagar con Culqi"
+4. Usa tarjeta de prueba de Culqi
+5. El pago se procesa y el producto se marca como comprado
+
+**Tarjetas de prueba Culqi:**
+- Número: 4111 1111 1111 1111
+- CVV: 123
+- Fecha: cualquier fecha futura
+- Email: cualquier email
 
 ## Próximos Pasos
 
-1. Frontend completado (este paso)
-2. Configurar Supabase Auth
-3. Crear tablas en Supabase
-4. Implementar Edge Functions
-5. Configurar Culqi real
-6. Reemplazar services mock por llamadas a Supabase
-7. Deploy a producción
+1. Agregar más productos en la base de datos
+2. Implementar webhooks de Culqi
+3. Panel de administración
+4. Envío de emails de confirmación
+5. Deploy a producción
 
 ## Tecnologías
 
@@ -191,18 +226,14 @@ El proyecto está completamente funcional con **datos mock**:
 - **Tailwind CSS** - Estilos
 - **Lucide React** - Iconos
 - **Supabase** - Backend (Auth + DB + Functions)
-- **Culqi** - Pasarela de pagos
+- **Culqi v4** - Pasarela de pagos
 
-## Notas de Desarrollo
+## Notas Importantes
 
-- Los servicios actuales son **mock** y funcionan con localStorage
-- Cuando conectes Supabase, reemplaza los servicios por llamadas reales
-- La llave secreta de Culqi **NUNCA** debe estar en el frontend
-- Todos los pagos deben procesarse en Edge Functions
-
-## Contribuir
-
-Este es un proyecto educativo para demostrar arquitectura segura de pagos.
+- Nunca expongas la SECRET_KEY de Culqi en el frontend
+- Todas las operaciones críticas deben pasar por Edge Functions
+- Los precios siempre se validan en el servidor
+- El frontend solo muestra información, nunca decide lógica de negocio
 
 ## Licencia
 

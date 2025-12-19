@@ -11,29 +11,34 @@ export function useProducts(userId?: string) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadProducts();
+    if (userId) {
+      loadProducts();
+    }
   }, [userId]);
 
   const loadProducts = async () => {
     try {
       setLoading(true);
       setError(null);
-      const allProducts = await productsService.getProducts();
+      
+      const [allProducts, purchased] = await Promise.all([
+        productsService.getProducts(),
+        productsService.getPurchasedProducts(),
+      ]);
+      
       setProducts(allProducts);
-
-      if (userId) {
-        const purchased = await productsService.getPurchasedProducts(userId);
-        setPurchasedProducts(purchased);
-      }
+      setPurchasedProducts(purchased);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al cargar productos');
+      const errorMessage = err instanceof Error ? err.message : 'Error al cargar productos';
+      setError(errorMessage);
+      console.error('Error al cargar productos:', err);
     } finally {
       setLoading(false);
     }
   };
 
   const isPurchased = (productId: string): boolean => {
-    return purchasedProducts.some(p => p.id === productId);
+    return products.find(p => p.id === productId)?.purchased || false;
   };
 
   const refreshProducts = () => {

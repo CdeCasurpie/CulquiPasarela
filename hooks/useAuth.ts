@@ -10,13 +10,39 @@ export function useAuth() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    // Verificar sesión al cargar
-    const session = authService.getSession();
-    if (session) {
-      setUser(session.user);
-      setIsAuthenticated(true);
-    }
-    setLoading(false);
+    // Verificar sesión inicial
+    const checkSession = async () => {
+      try {
+        const session = await authService.getSession();
+        if (session) {
+          setUser(session.user);
+          setIsAuthenticated(true);
+        }
+      } catch (error) {
+        console.error('Error al verificar sesión:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    checkSession();
+
+    // Escuchar cambios en la autenticación
+    const { data: { subscription } } = authService.onAuthStateChange((session) => {
+      if (session) {
+        setUser(session.user);
+        setIsAuthenticated(true);
+      } else {
+        setUser(null);
+        setIsAuthenticated(false);
+      }
+      setLoading(false);
+    });
+
+    // Limpiar suscripción al desmontar
+    return () => {
+      subscription?.unsubscribe();
+    };
   }, []);
 
   const login = async (email: string, password: string) => {

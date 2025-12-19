@@ -1,24 +1,10 @@
 import { User, Session } from '@/types';
-
-// Mock de usuarios para desarrollo
-const MOCK_USERS = [
-  { id: '1', email: 'demo@culqi.com', password: 'demo123' },
-  { id: '2', email: 'test@test.com', password: 'test123' }
-];
+import { supabase } from '@/lib/supabase/client';
 
 class AuthService {
   private static instance: AuthService;
-  private currentSession: Session | null = null;
 
-  private constructor() {
-    // Restaurar sesión del localStorage
-    if (typeof window !== 'undefined') {
-      const savedSession = localStorage.getItem('mock_session');
-      if (savedSession) {
-        this.currentSession = JSON.parse(savedSession);
-      }
-    }
-  }
+  private constructor() {}
 
   static getInstance(): AuthService {
     if (!AuthService.instance) {
@@ -27,83 +13,119 @@ class AuthService {
     return AuthService.instance;
   }
 
-  // Login mock
+  // Login con Supabase Auth
   async login(email: string, password: string): Promise<Session> {
-    // Simular delay de red
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-    const user = MOCK_USERS.find(u => u.email === email && u.password === password);
-    
-    if (!user) {
-      throw new Error('Credenciales inválidas');
+    if (error) {
+      throw new Error(error.message);
     }
 
-    const session: Session = {
-      user: { id: user.id, email: user.email },
-      access_token: `mock_token_${user.id}_${Date.now()}`
+    if (!data.session || !data.user) {
+      throw new Error('No se pudo iniciar sesión');
+    }
+
+    return {
+      user: {
+        id: data.user.id,
+        email: data.user.email!,
+        created_at: data.user.created_at,
+      },
+      access_token: data.session.access_token,
     };
-
-    this.currentSession = session;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('mock_session', JSON.stringify(session));
-    }
-
-    return session;
   }
 
-  // Registro mock
+  // Registro con Supabase Auth
   async register(email: string, password: string): Promise<Session> {
-    // Simular delay de red
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Validar que el email no exista
-    if (MOCK_USERS.some(u => u.email === email)) {
-      throw new Error('El email ya está registrado');
-    }
-
-    // Crear nuevo usuario mock
-    const newUser = {
-      id: `${Date.now()}`,
+    const { data, error } = await supabase.auth.signUp({
       email,
-      password
-    };
+      password,
+    });
 
-    MOCK_USERS.push(newUser);
-
-    const session: Session = {
-      user: { id: newUser.id, email: newUser.email },
-      access_token: `mock_token_${newUser.id}_${Date.now()}`
-    };
-
-    this.currentSession = session;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('mock_session', JSON.stringify(session));
+    if (error) {
+      throw new Error(error.message);
     }
 
-    return session;
+    if (!data.session || !data.user) {
+      throw new Error('Usuario registrado. Por favor verifica tu email.');
+    }
+
+    return {
+      user: {
+        id: data.user.id,
+        email: data.user.email!,
+        created_at: data.user.created_at,
+      },
+      access_token: data.session.access_token,
+    };
   }
 
   // Logout
   async logout(): Promise<void> {
-    this.currentSession = null;
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('mock_session');
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      throw new Error(error.message);
     }
   }
 
   // Obtener sesión actual
-  getSession(): Session | null {
-    return this.currentSession;
+  async getSession(): Promise<Session | null> {
+    const { data: { session }, error } = await supabase.auth.getSession();
+    
+    if (error || !session) {
+      return null;
+    }
+
+    return {
+      user: {
+        id: session.user.id,
+        email: session.user.email!,
+        created_at: session.user.created_at,
+      },
+      access_token: session.access_token,
+    };
   }
 
   // Verificar si está autenticado
-  isAuthenticated(): boolean {
-    return this.currentSession !== null;
+  async isAuthenticated(): Promise<boolean> {
+    const session = await this.getSession();
+    return session !== null;
   }
 
   // Obtener usuario actual
-  getCurrentUser(): User | null {
-    return this.currentSession?.user || null;
+  async getCurrentUser(): Promise<User | null> {
+    const { data: { user }, error } = await supabase.auth.getUser();
+    
+    if (error || !user) {
+      return null;
+    }
+
+    return {
+      id: user.id,
+      email: user.email!,
+      created_at: user.created_at,
+    };
+  }
+
+  // Escuchar cambios en la autenticación
+  onAuthStateChange(callback: (session: Session | null) => void) {
+    return supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        callback({
+          user: {
+            id: session.user.id,
+            email: session.user.email!,
+            created_at: session.user.created_at,
+          },
+          access_token: session.access_token,
+        });
+      } else {
+        callback(null);
+      }
+    });
   }
 }
 
